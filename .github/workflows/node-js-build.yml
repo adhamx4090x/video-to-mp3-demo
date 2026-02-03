@@ -36,28 +36,30 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-        cache-dependency-path: 'api/package-lock.json'
+        # عدلنا المسار دلوقتي
+        cache-dependency-path: 'package-lock.json'
 
-    - name: Install dependencies (API)
+    - name: Install dependencies
+      # حذفنا المسار ./api
       run: npm ci
-      working-directory: ./api
 
     - name: Run tests (if any)
       run: npm test
-      working-directory: ./api
-      continue-on-error: true # لأن ممكن مكونش فيه Tests
+      continue-on-error: true
 
     - name: Run build (if any)
       run: npm run build
-      working-directory: ./api
-      continue-on-error: true # لأن npm run build ممكن ميكونش جاهز
+      continue-on-error: true
 
-    - name: Archive production API directory
+    - name: Archive production directory
       uses: actions/upload-artifact@v4
       with:
         name: node-api-dist-${{ matrix.node-version }}
         path: |
           api/
-          !api/node_modules/
-          !api/.git/
+          web/
+          package*.json
+          # احذف المجلدات اللي متحتاجش
+          !node_modules/
+          !.git/
         retention-days: 7
