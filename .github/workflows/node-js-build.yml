@@ -36,11 +36,10 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-        # عدلنا المسار دلوقتي
-        cache-dependency-path: 'package-lock.json'
+        # عدلنا المسار دلوقتي ليعمل بحث في كل الأماكن
+        cache-dependency-path: '**/package-lock.json'
 
     - name: Install dependencies
-      # حذفنا المسار ./api
       run: npm ci
 
     - name: Run tests (if any)
@@ -59,7 +58,6 @@ jobs:
           api/
           web/
           package*.json
-          # احذف المجلدات اللي متحتاجش
           !node_modules/
           !.git/
         retention-days: 7
