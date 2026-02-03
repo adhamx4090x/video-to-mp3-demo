@@ -7,7 +7,6 @@ on:
       - 'api/**'
       - 'web/**'
       - 'package*.json'
-      - 'package-lock.json'
       - '.github/workflows/node-js-build.yml'
   pull_request:
     branches: [ main ]
@@ -15,7 +14,6 @@ on:
       - 'api/**'
       - 'web/**'
       - 'package*.json'
-      - 'package-lock.json'
       - '.github/workflows/node-js-build.yml'
   workflow_dispatch:
 
@@ -36,28 +34,30 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-        # عدلنا المسار دلوقتي ليعمل بحث في كل الأماكن
-        cache-dependency-path: '**/package-lock.json'
+        # نغير المسار دلوقتي ليعمل cache من package-lock.json اللي في api
+        cache-dependency-path: 'api/package-lock.json'
 
     - name: Install dependencies
+      # نغير المكان اللي بيشتغل فيه npm
       run: npm ci
+      working-directory: ./api
 
     - name: Run tests (if any)
       run: npm test
+      working-directory: ./api
       continue-on-error: true
 
     - name: Run build (if any)
       run: npm run build
+      working-directory: ./api
       continue-on-error: true
 
-    - name: Archive production directory
+    - name: Archive production API directory
       uses: actions/upload-artifact@v4
       with:
         name: node-api-dist-${{ matrix.node-version }}
         path: |
           api/
-          web/
-          package*.json
-          !node_modules/
-          !.git/
+          !api/node_modules/
+          !api/.git/
         retention-days: 7
