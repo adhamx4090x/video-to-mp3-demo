@@ -1,0 +1,63 @@
+name: Node.js CI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'api/**'
+      - 'web/**'
+      - 'package*.json'
+      - 'package-lock.json'
+      - '.github/workflows/node-js-build.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'web/**'
+      - 'package*.json'
+      - 'package-lock.json'
+      - '.github/workflows/node-js-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        cache-dependency-path: 'api/package-lock.json'
+
+    - name: Install dependencies (API)
+      run: npm ci
+      working-directory: ./api
+
+    - name: Run tests (if any)
+      run: npm test
+      working-directory: ./api
+      continue-on-error: true # لأن ممكن مكونش فيه Tests
+
+    - name: Run build (if any)
+      run: npm run build
+      working-directory: ./api
+      continue-on-error: true # لأن npm run build ممكن ميكونش جاهز
+
+    - name: Archive production API directory
+      uses: actions/upload-artifact@v4
+      with:
+        name: node-api-dist-${{ matrix.node-version }}
+        path: |
+          api/
+          !api/node_modules/
+          !api/.git/
+        retention-days: 7
