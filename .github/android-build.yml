@@ -1,0 +1,231 @@
+name: Android Standalone Build
+
+# This workflow builds, tests, and signs Android applications.
+# It supports both debug and release builds, runs static analysis,
+# executes unit tests, and uploads build artifacts.
+
+on:
+  # Trigger on push to main and develop branches
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.java'
+      - '**.kt'
+      - '**.xml'
+      - '**/build.gradle*'
+      - '**/settings.gradle'
+      - '**/gradle.properties'
+      - '.github/workflows/android-build.yml'
+
+  # Trigger on pull requests to main branch
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.java'
+      - '**.kt'
+      - '**.xml'
+      - '**/build.gradle*'
+      - '**/settings.gradle'
+      - '**/gradle.properties'
+      - '.github/workflows/android-build.yml'
+
+  # Allow manual triggering for custom builds
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (debug or release)'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+      java_version:
+        description: 'Java version to use'
+        required: false
+        default: '17'
+        type: string
+
+# Cancel in-progress runs when a new workflow with the same group is triggered
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Set default Java version
+  JAVA_VERSION: ${{ github.event.inputs.java_version || '17' }}
+  # Set Android SDK location
+  ANDROID_SDK_ROOT: ${{ github.workspace }}/android-sdk
+
+jobs:
+  # Job to build and test the Android application
+  build:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    # Define the steps to execute
+    steps:
+      # Step 1: Checkout the repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          sparse-checkout: |
+            app
+            library
+            gradle
+            gradle.properties
+            build.gradle.kts
+            settings.gradle.kts
+
+      # Step 2: Set up Java environment
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      # Step 3: Set up Android SDK
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          build-tools: 34.0.0
+
+      # Step 4: Cache Gradle packages to speed up builds
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.android/build-cache
+            ${{ env.ANDROID_SDK_ROOT }}/.gradle
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # Step 5: Make Gradle wrapper executable
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      # Step 6: Run lint checks for static code analysis
+      - name: Run lint checks
+        run: ./gradlew lintDebug --stacktrace
+        continue-on-error: true
+
+      # Step 7: Run unit tests
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      # Step 8: Build debug APK
+      - name: Build debug APK
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug' }}
+        run: ./gradlew assembleDebug --stacktrace
+
+      # Step 9: Build release APK and AAB (if release build is triggered)
+      - name: Build release APK and AAB
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' }}
+        run: |
+          # Decode the keystore file from base64
+          echo "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > release-keystore.jks
+
+          # Set environment variables for signing
+          export KEYSTORE_PASSWORD=${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          export KEY_ALIAS=${{ secrets.RELEASE_KEY_ALIAS }}
+          export KEY_PASSWORD=${{ secrets.RELEASE_KEY_PASSWORD }}
+
+          # Build release APK and App Bundle
+          ./gradlew assembleRelease bundleRelease --stacktrace
+
+      # Step 10: Upload debug artifacts (if debug build was executed)
+      - name: Upload debug APK
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_type == 'debug' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: app/build/outputs/apk/debug/
+          retention-days: 7
+
+      # Step 11: Upload release artifacts (if release build was executed)
+      - name: Upload release artifacts
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'release' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-apk
+          path: |
+            app/build/outputs/apk/release/
+            app/build/outputs/bundle/release/
+          retention-days: 30
+
+  # Job to analyze the build with Danger
+  analyze:
+    name: Code Analysis
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: 34
+          build-tools: 34.0.0
+
+      - name: Run Danger analysis
+        run: |
+          echo "Running code quality analysis..."
+          ./gradlew danger --stacktrace
+
+# Summary of the workflow
+# This GitHub Actions workflow provides comprehensive CI/CD capabilities for Android applications:
+#
+# 1. AUTOMATED BUILD TRIGGERS:
+#    - Push to main or develop branches
+#    - Pull requests to main branch
+#    - Manual workflow dispatch for custom builds
+#
+# 2. BUILD ENVIRONMENT:
+#    - Uses Ubuntu latest runner
+#    - Java 17 (Temurin distribution)
+#    - Android SDK with API 34 and build-tools 34.0.0
+#
+# 3. BUILD PROCESS:
+#    - Caches Gradle packages for faster builds
+#    - Runs lint checks for static analysis
+#    - Executes unit tests
+#    - Builds debug APK by default
+#    - Builds signed release APK and AAB on manual trigger
+#
+# 4. ARTIFACT MANAGEMENT:
+#    - Debug APKs: 7-day retention
+#    - Release APKs and AABs: 30-day retention
+#
+# 5. SECURITY:
+#    - Signing keys stored as GitHub secrets
+#    - Release builds only on manual trigger
+#    - No hardcoded credentials in workflow
+#
+# Required GitHub Secrets:
+#   - RELEASE_KEYSTORE_BASE64: Base64 encoded keystore file
+#   - RELEASE_KEYSTORE_PASSWORD: Password for the keystore
+#   - RELEASE_KEY_ALIAS: Alias name for the signing key
+#   - RELEASE_KEY_PASSWORD: Password for the signing key
+#
+# To use this workflow:
+# 1. Add this file to .github/workflows/android-build.yml
+# 2. Configure the required secrets in GitHub repository settings
+# 3. Push changes to trigger the workflow or run it manually
+
